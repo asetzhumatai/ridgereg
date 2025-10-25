@@ -71,12 +71,18 @@ test_that("ridgereg and MASS::lm.ridge give similar coefficient direction", {
   library(MASS)
   data(iris)
   model_my <- ridgereg(Sepal.Length ~ Sepal.Width + Petal.Length + Petal.Width,
-                       data = iris, lambda = 1)
+                       data = iris, lambda = 1, center_y = TRUE)
+
+#
+#   print(coef(model_my))         # Should be a named numeric vector
+#   print(coef(model_my)[-1])     # Should not be NULL
+
+
   model_mass <- MASS::lm.ridge(Sepal.Length ~ Sepal.Width + Petal.Length + Petal.Width,
                                data = iris, lambda = 1)
 
   cf_my <- coef(model_my)[-1]   # exclude intercept
-  cf_mass <- coef(model_mass)
+  cf_mass <- coef(model_mass)[-1]  #exclude intercept
 
   # Should have same signs and strong positive correlation
   expect_equal(sign(cf_my), sign(cf_mass))

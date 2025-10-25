@@ -1,25 +1,26 @@
 data(iris)
 
-ridgereg <- function(formula, data, lambda){
+ridgereg <- function(formula, data, lambda, center_y = FALSE){
   mf <- stats::model.frame(formula, data = data, na.action = stats::na.pass)
   tt <- stats::terms(mf)
   X  <- stats::model.matrix(tt, mf)
   y  <- as.numeric(stats::model.response(mf))
 
-  # Normalize numeric columns (exclude intercept)
-  X_no_intercept <- X[, -1, drop = FALSE]
-  cols_to_scale <- apply(X_no_intercept, 2, function(col) length(unique(col)) > 2)
+  # Conditional normalization: only normalize X if lambda ≠ 0
+  if (lambda != 0) {
+    X_no_intercept <- X[, -1, drop = FALSE]
+    X_no_intercept <- scale(X_no_intercept)
+    X <- cbind("(Intercept)" = 1, X_no_intercept)
 
-  X_no_intercept[, cols_to_scale] <- apply(X_no_intercept[, cols_to_scale, drop = FALSE], 2,
-                                           function(x) (x - mean(x)) / sqrt(var(x)))
-
-  X_norm <- cbind("(Intercept)" = 1, X_no_intercept)
-  X <- X_norm
+    if (center_y) {
+      y <- y - mean(y)
+    }
+  }
 
   XtX <- t(X) %*% X
   Xty <- t(X) %*% y
   I <- diag(ncol(X))
-  I[1, 1] <- 0
+  I[1, 1] <- 0  # Don't penalize intercept
 
   beta_ridge <- as.numeric(solve(XtX + lambda * I, Xty))
   names(beta_ridge) <- colnames(X)
@@ -51,6 +52,6 @@ predict.ridgereg <- function(x){
   return(x$y_hat)
 }
 
-coef.ridgereg <- function(x){
+coef.ridgereg <- function(x, ...){
   return(x$beta_ridge)
 }
