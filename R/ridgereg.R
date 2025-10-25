@@ -68,7 +68,8 @@ ridgereg <- function(formula, data, lambda, center_y = FALSE){
     X = X,
     y = y,
     lambda = lambda,
-    call = match.call()
+    call = match.call(),
+    terms = tt
   )
   class(ridgereg) <- "ridgereg"
   return(ridgereg)
@@ -106,8 +107,39 @@ print.ridgereg <- function(x){
 #'
 #' @method predict ridgereg
 #' @export
-predict.ridgereg <- function(x){
-  return(x$y_hat)
+#' Predict Method for Ridge Regression Objects (caret-safe)
+#'
+#' @param object A "ridgereg" model object.
+#' @param newdata New data for prediction (data frame or matrix).
+#' @param ... Additional arguments.
+#' @export
+predict.ridgereg <- function(object, newdata = NULL, ...) {
+  if (is.null(newdata)) {
+    return(object$y_hat)
+  }
+
+  # Always work with a data frame
+  newdata <- as.data.frame(newdata)
+
+  # Identify predictors from training
+  predictors <- setdiff(colnames(object$X), "(Intercept)")
+
+  # Subset and align predictors
+  X_new <- newdata[, predictors, drop = FALSE]
+
+  # Replace any missing columns with zeros
+  missing_cols <- setdiff(predictors, colnames(newdata))
+  if (length(missing_cols) > 0) {
+    for (col in missing_cols) X_new[, col] <- 0
+  }
+
+  # Reorder to match training matrix
+  X_new <- X_new[, predictors, drop = FALSE]
+
+  # Add intercept column
+  X_new <- cbind("(Intercept)" = 1, X_new)
+
+  as.vector(as.matrix(X_new) %*% object$beta_ridge)
 }
 
 

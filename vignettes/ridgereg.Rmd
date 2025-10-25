@@ -1,0 +1,189 @@
+---
+title: "ridgereg"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{ridgereg}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(ridgereg)
+library(mlbench) 
+library(caret)
+library(leaps) 
+```
+
+Description of BostonHousing dataset
+
+```{r}
+data("BostonHousing")
+data <- BostonHousing
+head(data)
+```
+
+1. Split data into test/train sets using caret:
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(data$medv, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+head(trainIndex)
+
+dataTrain <- data[ trainIndex,]
+dataTest  <- data[-trainIndex,]
+```
+
+2. Linear Regression 
+
+```{r}
+set.seed(123)
+
+lm_fit <- train(
+  medv ~ ., 
+  data = dataTrain,
+  method = "lm"
+)
+
+summary(lm_fit$finalModel)
+```
+
+Linear Regression with Forward Selection
+```{r}
+set.seed(123)
+
+lm_forward <- train(
+  medv ~ ., 
+  data = dataTrain,
+  method = "leapForward",
+  tuneGrid = data.frame(nvmax = 1:(ncol(dataTrain) - 1)),  
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+lm_forward
+summary(lm_forward$finalModel)
+```
+
+3. Evaluate the performance of the model
+
+```{r}
+# Predictions on training data
+pred_train_lm <- predict(lm_fit, newdata = dataTrain)
+pred_train_forward <- predict(lm_forward, newdata = dataTrain)
+
+# Evaluate with caret's built-in function
+res_lm <- postResample(pred_train_lm, dataTrain$medv)
+res_forward <- postResample(pred_train_forward, dataTrain$medv)
+
+res_lm
+res_forward
+```
+
+4. Fit the ridge regression model for different lambda values
+
+```{r}
+library(caret)
+
+# ----- Define caret model wrapper for ridgereg() -----
+ridgereg_model <- list(
+  type = "Regression",
+  library = NULL,
+  parameters = data.frame(
+    parameter = "lambda",
+    class = "numeric",
+    label = "Ridge Penalty (λ)"
+  ),
+
+  grid = function(x, y, len = NULL, search = "grid") {
+    if (is.null(len) || len < 1) len <- 25
+    data.frame(lambda = seq(0, 10, length.out = len))
+  },
+
+  fit = function(x, y, wts, param, lev, last, classProbs, ...) {
+    dat <- as.data.frame(x)
+    dat$y <- y
+    form <- as.formula("y ~ .")
+    mod <- tryCatch(
+      ridgereg(formula = form, data = dat, lambda = param$lambda),
+      error = function(e) {
+        message("❌ Fit failed for lambda = ", param$lambda)
+        NULL
+      }
+    )
+    mod
+  },
+
+  predict = function(modelFit, newdata, submodels = NULL) {
+    if (is.null(modelFit)) return(rep(NA_real_, nrow(newdata)))
+    out <- tryCatch(
+      {
+        preds <- predict(modelFit, newdata = newdata)
+        if (length(preds) != nrow(newdata)) {
+          message("⚠️ predict() length mismatch: ",
+                  length(preds), " vs ", nrow(newdata))
+          preds <- rep(NA_real_, nrow(newdata))
+        }
+        as.numeric(preds)
+      },
+      error = function(e) {
+        message("❌ Predict failed: ", e$message)
+        rep(NA_real_, nrow(newdata))
+      }
+    )
+    out
+  },
+
+  prob = NULL
+)
+```
+
+5. Best hyperparameter lamda:
+
+```{r}
+set.seed(123)
+  
+ridge_fit <- train(
+  medv ~ ., 
+  data = dataTrain,
+  method = ridgereg_model,
+  tuneGrid = data.frame(lambda = seq(0, 1, length = 10)),
+  trControl = trainControl(method = "cv", number = 10)      # 10-fold CV
+)
+  
+ridge_fit
+plot(ridge_fit)
+```
+
+The optimal λ chosen by cross-validation is λ = 0, which corresponds to the unregularized OLS solution.
+
+6. Evaluate all  three models
+
+```{r}
+# Predictions
+pred_lm       <- predict(lm_fit,       newdata = dataTest)
+pred_forward  <- predict(lm_forward,   newdata = dataTest)
+pred_ridge    <- predict(ridge_fit,    newdata = dataTest)
+
+# Performance metrics
+res_lm       <- postResample(pred_lm,      dataTest$medv)
+res_forward  <- postResample(pred_forward, dataTest$medv)
+res_ridge    <- postResample(pred_ridge,   dataTest$medv)
+
+# Combine into one table
+results <- rbind(
+  Linear  = res_lm,
+  Forward = res_forward,
+  Ridge   = res_ridge
+)
+round(results, 3)
+```
+
+
