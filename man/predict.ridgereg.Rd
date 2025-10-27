@@ -4,9 +4,15 @@
 \alias{predict.ridgereg}
 \title{Predict Method for Ridge Regression Objects}
 \usage{
-\method{predict}{ridgereg}(x)
+\method{predict}{ridgereg}(object, newdata = NULL, ...)
 }
 \arguments{
+\item{object}{A "ridgereg" model object.}
+
+\item{newdata}{New data for prediction (data frame or matrix).}
+
+\item{...}{Additional arguments.}
+
 \item{x}{An object of class \code{"ridgereg"} returned by \code{\link{ridgereg}}.}
 }
 \value{

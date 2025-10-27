@@ -16,6 +16,7 @@ Encoding: UTF-8
 LazyData: true
 Suggests: 
     knitr,
+    nycflights13,
     rmarkdown,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
@@ -23,3 +24,6 @@ URL: https://github.com/asetzhumatai/ridgereg
 BugReports: https://github.com/asetzhumatai/ridgereg/issues
 RoxygenNote: 7.3.3
 VignetteBuilder: knitr
+Imports: 
+    dplyr,
+    ggplot2
