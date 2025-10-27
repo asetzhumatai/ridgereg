@@ -35,7 +35,7 @@
 #'
 #' @export
 
-ridgereg <- function(formula, data, lambda, center_y = FALSE){
+ridgereg <- function(formula, data, lambda, center_y = TRUE){
   mf <- stats::model.frame(formula, data = data, na.action = stats::na.pass)
   tt <- stats::terms(mf)
   X  <- stats::model.matrix(tt, mf)

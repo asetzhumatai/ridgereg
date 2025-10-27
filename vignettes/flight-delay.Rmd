@@ -1,0 +1,145 @@
+---
+title: "Predictive Modeling of Flight Delays"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{flight-delay}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(ridgereg)  # Replace with your package name, e.g., linreg
+library(caret)
+library(dplyr)
+library(nycflights13)
+set.seed(123)  # For reproducibility
+```
+
+1.Load and Clean Data
+
+```{r load-data}
+data(flights)
+data(weather)
+
+# Clean flights: remove non-predictive vars, handle NAs
+# NOTE: Keep time_hour for joining with weather
+flights_clean <- flights %>%
+  select(-year, -month, -day, -dep_time, -sched_dep_time, -dep_delay, -arr_time,
+         -sched_arr_time, -flight, -tailnum, -air_time, -distance, -hour, -minute,
+         -carrier) %>%  # Removed -time_hour to keep it for join
+  na.omit()  # Remove rows with NA in remaining vars (including arr_delay)
+
+# Clean weather: select relevant vars, average by origin/time_hour if needed
+weather_clean <- weather %>%
+  select(origin, time_hour, temp, dewp, humid, wind_dir, wind_speed, wind_gust,
+         precip, pressure, visib) %>%
+  group_by(origin, time_hour) %>%
+  summarise(across(everything(), ~mean(., na.rm = TRUE)), .groups = "drop")
+```
+
+2.Weather and Interactions
+
+```{r}
+flights_data <- flights_clean %>%
+  left_join(weather_clean, by = c("origin", "time_hour")) %>%
+  mutate(
+    wind_precip = wind_speed * precip,  # Interaction: wind and precipitation
+    temp_humid = temp * humid,          # Interaction: temperature and humidity
+    wind_dir_rad = wind_dir * pi / 180  # Convert wind direction to radians if useful
+  ) %>%
+  na.omit()  # Remove any new NAs from join
+```
+If data is too large (~336k rows), subsample for speed during development:
+```{r}
+flights_data <- flights_data %>% sample_frac(0.1)  # Use 10% for testing; remove for final
+```
+
+3.Split Data: Train (80%), Validation (15%), Test (5%)
+
+```{r}
+# First, split into test (5%) and temp (95%)
+test_index <- createDataPartition(flights_data$arr_delay, p = 0.05, list = FALSE)
+test <- flights_data[test_index, ]
+temp <- flights_data[-test_index, ]
+
+# Then, split temp into train (84.2% of temp ~80% total) and validation (15.8% of temp ~15% total)
+train_index <- createDataPartition(temp$arr_delay, p = 0.842, list = FALSE)
+train <- temp[train_index, ]
+valid <- temp[-train_index, ]
+
+# Check proportions
+c(train = nrow(train) / nrow(flights_data),
+  valid = nrow(valid) / nrow(flights_data),
+  test = nrow(test) / nrow(flights_data))
+```
+
+4.Tune Lambda with Validation RMSE
+
+```{r}
+# Custom caret model for ridgereg
+ridge_custom <- list(
+  type = "Regression",
+  library = "yourpackagename",  # Your package
+  loop = NULL,
+  parameters = data.frame(parameter = "lambda", class = "numeric", label = "Lambda"),
+  grid = function(x, y, len = NULL, search = "grid") {
+    data.frame(lambda = seq(0, 10, length = len))  # Adjust range as needed
+  },
+  fit = function(x, y, wts, param, lev, last, weights, classProb, ...) {
+    data_train <- data.frame(y = y, x)
+    ridgereg(y ~ ., data = data_train, lambda = param$lambda, center_y = TRUE)
+  },
+  predict = function(modelFit, newdata, preProc = NULL, submodels = NULL) {
+    predict(modelFit, newdata)
+  },
+  prob = NULL
+)
+```
+
+5. Validation RMSE
+```{r}
+# Grid for lambda (try more values for finer tuning)
+lambda_grid <- data.frame(lambda = seq(0, 10, by = 0.5))  # Adjust as needed
+
+# Train models for each lambda (no CV here, as we use validation set)
+ctrl <- trainControl(method = "none")  # No resampling
+ridge_model <- train(
+  arr_delay ~ .,
+  data = train,
+  method = ridge_custom,
+  trControl = ctrl,
+  tuneGrid = lambda_grid
+)
+
+# Predict on validation and compute RMSE for each lambda
+valid_rmse <- sapply(lambda_grid$lambda, function(lam) {
+  model <- ridgereg(arr_delay ~ ., data = train, lambda = lam, center_y = TRUE)
+  preds <- predict(model, valid)
+  sqrt(mean((preds - valid$arr_delay)^2, na.rm = TRUE))
+})
+
+# Find best lambda
+best_lambda <- lambda_grid$lambda[which.min(valid_rmse)]
+cat("Best lambda:", best_lambda, "\n")
+cat("Validation RMSE at best lambda:", min(valid_rmse), "\n")
+```
+
+6. Predict on test
+
+```{r}
+# Fit final model with best lambda on train
+final_model <- ridgereg(arr_delay ~ ., data = train, lambda = best_lambda, center_y = TRUE)
+
+# Predict on test and compute RMSE
+test_preds <- predict(final_model, test)
+test_rmse <- sqrt(mean((test_preds - test$arr_delay)^2, na.rm = TRUE))
+cat("Test RMSE:", test_rmse, "\n")
+```
+

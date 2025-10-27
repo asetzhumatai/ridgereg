@@ -4,7 +4,7 @@
 \alias{ridgereg}
 \title{Ridge Regression Function}
 \usage{
-ridgereg(formula, data, lambda, center_y = FALSE)
+ridgereg(formula, data, lambda, center_y = TRUE)
 }
 \arguments{
 \item{formula}{A formula specifying the model (e.g., \code{y ~ x1 + x2}).}
