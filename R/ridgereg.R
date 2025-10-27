@@ -38,38 +38,60 @@
 ridgereg <- function(formula, data, lambda, center_y = TRUE){
   mf <- stats::model.frame(formula, data = data, na.action = stats::na.pass)
   tt <- stats::terms(mf)
-  X  <- stats::model.matrix(tt, mf)
-  y  <- as.numeric(stats::model.response(mf))
+  X <- stats::model.matrix(tt, mf)
+  y <- as.numeric(stats::model.response(mf))
 
-  # Conditional normalization: only normalize X if lambda ≠ 0
+  # --- Store Scaling Metadata ---
+  x_scale_params <- NULL
+  y_center_mean <- 0
+
+  # Conditional normalization
   if (lambda != 0) {
+    # 1. Scale Features (X)
     X_no_intercept <- X[, -1, drop = FALSE]
-    X_no_intercept <- scale(X_no_intercept)
-    X <- cbind("(Intercept)" = 1, X_no_intercept)
 
+    # Scale and store the attributes (center and scale) for consistent prediction
+    X_scaled <- scale(X_no_intercept)
+    x_scale_params <- list(
+      center = attr(X_scaled, "scaled:center"),
+      scale = attr(X_scaled, "scaled:scale")
+    )
+
+    # Reconstruct X with the intercept and scaled features
+    X <- cbind("(Intercept)" = 1, X_scaled)
+
+    # 2. Center Response (y)
     if (center_y) {
-      y <- y - mean(y)
+      y_center_mean <- mean(y) # Store the mean
+      y <- y - y_center_mean
     }
   }
 
   XtX <- t(X) %*% X
   Xty <- t(X) %*% y
   I <- diag(ncol(X))
-  I[1, 1] <- 0  # Don't penalize intercept
+  I[1, 1] <- 0 # Don't penalize intercept
 
   beta_ridge <- as.numeric(solve(XtX + lambda * I, Xty))
   names(beta_ridge) <- colnames(X)
 
-  y_hat <- as.vector(X %*% beta_ridge)
+  # Calculate predictions for the centered y
+  y_hat_centered <- as.vector(X %*% beta_ridge)
+
+  # Bug Fix 1: UN-CENTER the predictions before storing (crucial for testing RMSE)
+  y_hat <- y_hat_centered + y_center_mean
 
   ridgereg <- list(
     beta_ridge = beta_ridge,
-    y_hat = y_hat,
+    y_hat = y_hat, # Now stored on the original scale
     X = X,
-    y = y,
+    y = y,         # Still stores the centered/scaled X/y for debugging/internal consistency
     lambda = lambda,
     call = match.call(),
-    terms = tt
+    terms = tt,
+    # New metadata fields
+    x_scale_params = x_scale_params,
+    y_center_mean = y_center_mean
   )
   class(ridgereg) <- "ridgereg"
   return(ridgereg)
@@ -164,6 +186,7 @@ print.ridgereg <- function(x){
 
 
 predict.ridgereg <- function(object, newdata, ...) {
+  # If newdata is missing, return the pre-calculated, un-centered y_hat
   if (missing(newdata)) return(object$y_hat)
 
   if (!is.data.frame(newdata)) newdata <- as.data.frame(newdata)
@@ -171,29 +194,41 @@ predict.ridgereg <- function(object, newdata, ...) {
   # Build model matrix using the stored terms (without response)
   X_new <- model.matrix(delete.response(object$terms), newdata)
 
-  # Ensure intercept column consistency
-  if (!"(Intercept)" %in% colnames(X_new) && "(Intercept)" %in% colnames(object$X)) {
-    X_new <- cbind("(Intercept)" = 1, X_new)
+  # Bug Fix 2: Apply the same scaling used in training to the new features
+  if (!is.null(object$x_scale_params)) {
+    # Isolate features (excluding intercept)
+    X_no_intercept <- X_new[, -1, drop = FALSE]
+
+    # Apply stored center and scale
+    scaled_features <- sweep(X_no_intercept, 2, object$x_scale_params$center, "-")
+    scaled_features <- sweep(scaled_features, 2, object$x_scale_params$scale, "/")
+
+    # Reconstruct X_new
+    X_new <- cbind("(Intercept)" = 1, scaled_features)
   }
 
-  # Add any missing columns with zeros
+  # --- FIX: Handle subscript out of bounds error ---
+  # Find columns present in training (object$X) but missing in new data (X_new)
   missing_cols <- setdiff(colnames(object$X), colnames(X_new))
   if (length(missing_cols) > 0) {
+    # Add missing columns filled with zeros. This is essential for factors that
+    # might be absent in the new data but present in the training data.
     add <- matrix(0, nrow = nrow(X_new), ncol = length(missing_cols))
     colnames(add) <- missing_cols
     X_new <- cbind(X_new, add)
   }
 
-  # Drop any extra columns not used in training
-  common_cols <- intersect(colnames(object$X), colnames(X_new))
-  X_new <- X_new[, common_cols, drop = FALSE]
-
-  # Reorder columns to match training
+  # Final step: Reorder and subset X_new to exactly match the columns and order of object$X.
+  # This line will now safely execute because all required columns are present.
   X_new <- X_new[, colnames(object$X), drop = FALSE]
 
-  # Compute predictions
-  as.vector(X_new %*% object$beta_ridge)
+  # Compute predictions (these are for the centered y)
+  y_hat_centered <- as.vector(X_new %*% object$beta_ridge)
+
+  # Bug Fix 1: UN-CENTER the predictions before returning (essential for accurate results)
+  return(y_hat_centered + object$y_center_mean)
 }
+
 
 
 
