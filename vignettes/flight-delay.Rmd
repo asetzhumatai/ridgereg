@@ -15,7 +15,7 @@ knitr::opts_chunk$set(
 ```
 
 ```{r setup}
-library(ridgereg)  # Replace with your package name, e.g., linreg
+library(ridgereg) 
 library(caret)
 library(dplyr)
 library(nycflights13)
@@ -56,10 +56,14 @@ flights_data <- flights_clean %>%
   ) %>%
   na.omit()  # Remove any new NAs from join
 ```
-If data is too large (~336k rows), subsample for speed during development:
+
+If data is too large (\~336k rows), subsample for speed during development:
+
 ```{r}
 flights_data <- flights_data %>% sample_frac(0.1)  # Use 10% for testing; remove for final
 ```
+
+
 
 3.Split Data: Train (80%), Validation (15%), Test (5%)
 
@@ -80,13 +84,24 @@ c(train = nrow(train) / nrow(flights_data),
   test = nrow(test) / nrow(flights_data))
 ```
 
+```{r}
+# Ensure consistent factor levels across all splits
+for (col in names(train)) {
+  if (is.factor(train[[col]]) && col %in% names(valid)) {
+    valid[[col]] <- factor(valid[[col]], levels = levels(train[[col]]))
+  }
+  if (is.factor(train[[col]]) && col %in% names(test)) {
+    test[[col]] <- factor(test[[col]], levels = levels(train[[col]]))
+  }
+}
+```
 4.Tune Lambda with Validation RMSE
 
 ```{r}
 # Custom caret model for ridgereg
 ridge_custom <- list(
   type = "Regression",
-  library = "yourpackagename",  # Your package
+  library = "ridgereg",  
   loop = NULL,
   parameters = data.frame(parameter = "lambda", class = "numeric", label = "Lambda"),
   grid = function(x, y, len = NULL, search = "grid") {
@@ -103,25 +118,26 @@ ridge_custom <- list(
 )
 ```
 
-5. Validation RMSE
+5.  Validation RMSE
+
 ```{r}
 # Grid for lambda (try more values for finer tuning)
-lambda_grid <- data.frame(lambda = seq(0, 10, by = 0.5))  # Adjust as needed
+lambda_grid <- data.frame(lambda = seq(0.1, 10, by = 0.5))  # Adjust as needed
 
-# Train models for each lambda (no CV here, as we use validation set)
-ctrl <- trainControl(method = "none")  # No resampling
-ridge_model <- train(
-  arr_delay ~ .,
-  data = train,
-  method = ridge_custom,
-  trControl = ctrl,
-  tuneGrid = lambda_grid
-)
 
+
+# --- Data preparation before loop ---
+train <- train %>% mutate(time_hour_num = as.numeric(time_hour)) %>% select(-time_hour)
+valid <- valid %>% mutate(time_hour_num = as.numeric(time_hour)) %>% select(-time_hour)
+test  <- test  %>% mutate(time_hour_num  = as.numeric(time_hour)) %>% select(-time_hour)
 # Predict on validation and compute RMSE for each lambda
 valid_rmse <- sapply(lambda_grid$lambda, function(lam) {
   model <- ridgereg(arr_delay ~ ., data = train, lambda = lam, center_y = TRUE)
-  preds <- predict(model, valid)
+
+
+  preds <- predict(model, newdata = valid[, setdiff(names(valid), "arr_delay")])
+
+
   sqrt(mean((preds - valid$arr_delay)^2, na.rm = TRUE))
 })
 
@@ -131,7 +147,7 @@ cat("Best lambda:", best_lambda, "\n")
 cat("Validation RMSE at best lambda:", min(valid_rmse), "\n")
 ```
 
-6. Predict on test
+6.  Predict on test
 
 ```{r}
 # Fit final model with best lambda on train
@@ -142,4 +158,3 @@ test_preds <- predict(final_model, test)
 test_rmse <- sqrt(mean((test_preds - test$arr_delay)^2, na.rm = TRUE))
 cat("Test RMSE:", test_rmse, "\n")
 ```
-

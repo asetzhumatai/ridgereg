@@ -100,47 +100,101 @@ print.ridgereg <- function(x){
 #'
 #' Returns the fitted values from a ridge regression model.
 #'
-#' @param x An object of class \code{"ridgereg"} returned by \code{\link{ridgereg}}.
+#' @param object An object of class \code{"ridgereg"} returned by \code{\link{ridgereg}}.
+#' @param newdata New data for prediction (data frame or matrix).
+#' @param ... Additional arguments.
 #'
-#' @return
-#' A numeric vector of predicted (fitted) values.
+#' @return A numeric vector of predicted (fitted) values.
 #'
 #' @method predict ridgereg
 #' @export
-#' Predict Method for Ridge Regression Objects (caret-safe)
+#' @examples
+#' model <- ridgereg(y ~ x1 + x2, data = mydata, lambda = 1)
+#' preds <- predict(model, newdata = mydata)
 #'
-#' @param object A "ridgereg" model object.
-#' @param newdata New data for prediction (data frame or matrix).
-#' @param ... Additional arguments.
-#' @export
-predict.ridgereg <- function(object, newdata = NULL, ...) {
-  if (is.null(newdata)) {
-    return(object$y_hat)
+# predict.ridgereg <- function(object, newdata = NULL, ...) {
+#   if (is.null(newdata)) {
+#     return(object$y_hat)
+#   }
+#
+#   # Always work with a data frame
+#   newdata <- as.data.frame(newdata)
+#
+#   # Identify predictors from training
+#   predictors <- setdiff(colnames(object$X), "(Intercept)")
+#
+#   # Subset and align predictors
+#   X_new <- newdata[, predictors, drop = FALSE]
+#
+#   # Replace any missing columns with zeros
+#   missing_cols <- setdiff(predictors, colnames(newdata))
+#   if (length(missing_cols) > 0) {
+#     for (col in missing_cols) X_new[, col] <- 0
+#   }
+#
+#   # Reorder to match training matrix
+#   X_new <- X_new[, predictors, drop = FALSE]
+#
+#   # Add intercept column
+#   X_new <- cbind("(Intercept)" = 1, X_new)
+#
+#   as.vector(as.matrix(X_new) %*% object$beta_ridge)
+# }
+
+
+# predict.ridgereg <- function(object, newdata, ...) {
+#   if (missing(newdata)) {
+#     # If no new data, return fitted values
+#     return(object$y_hat)
+#   }
+#
+#   # Ensure newdata is a data.frame
+#   if (!is.data.frame(newdata)) {
+#     newdata <- as.data.frame(newdata)
+#   }
+#
+#   # Recreate model matrix using the same terms as in training
+#   X_new <- model.matrix(delete.response(object$terms), newdata)
+#
+#   # Multiply by coefficients (ensure names align)
+#   preds <- as.vector(X_new %*% object$beta_ridge)
+#
+#   return(preds)
+# }
+
+
+predict.ridgereg <- function(object, newdata, ...) {
+  if (missing(newdata)) return(object$y_hat)
+
+  if (!is.data.frame(newdata)) newdata <- as.data.frame(newdata)
+
+  # Build model matrix using the stored terms (without response)
+  X_new <- model.matrix(delete.response(object$terms), newdata)
+
+  # Ensure intercept column consistency
+  if (!"(Intercept)" %in% colnames(X_new) && "(Intercept)" %in% colnames(object$X)) {
+    X_new <- cbind("(Intercept)" = 1, X_new)
   }
 
-  # Always work with a data frame
-  newdata <- as.data.frame(newdata)
-
-  # Identify predictors from training
-  predictors <- setdiff(colnames(object$X), "(Intercept)")
-
-  # Subset and align predictors
-  X_new <- newdata[, predictors, drop = FALSE]
-
-  # Replace any missing columns with zeros
-  missing_cols <- setdiff(predictors, colnames(newdata))
+  # Add any missing columns with zeros
+  missing_cols <- setdiff(colnames(object$X), colnames(X_new))
   if (length(missing_cols) > 0) {
-    for (col in missing_cols) X_new[, col] <- 0
+    add <- matrix(0, nrow = nrow(X_new), ncol = length(missing_cols))
+    colnames(add) <- missing_cols
+    X_new <- cbind(X_new, add)
   }
 
-  # Reorder to match training matrix
-  X_new <- X_new[, predictors, drop = FALSE]
+  # Drop any extra columns not used in training
+  common_cols <- intersect(colnames(object$X), colnames(X_new))
+  X_new <- X_new[, common_cols, drop = FALSE]
 
-  # Add intercept column
-  X_new <- cbind("(Intercept)" = 1, X_new)
+  # Reorder columns to match training
+  X_new <- X_new[, colnames(object$X), drop = FALSE]
 
-  as.vector(as.matrix(X_new) %*% object$beta_ridge)
+  # Compute predictions
+  as.vector(X_new %*% object$beta_ridge)
 }
+
 
 
 #' Coefficients Method for Ridge Regression Objects

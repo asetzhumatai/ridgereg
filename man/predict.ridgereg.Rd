@@ -7,17 +7,20 @@
 \method{predict}{ridgereg}(object, newdata = NULL, ...)
 }
 \arguments{
-\item{object}{A "ridgereg" model object.}
+\item{object}{An object of class \code{"ridgereg"} returned by \code{\link{ridgereg}}.}
 
 \item{newdata}{New data for prediction (data frame or matrix).}
 
 \item{...}{Additional arguments.}
-
-\item{x}{An object of class \code{"ridgereg"} returned by \code{\link{ridgereg}}.}
 }
 \value{
 A numeric vector of predicted (fitted) values.
 }
 \description{
 Returns the fitted values from a ridge regression model.
+}
+\examples{
+model <- ridgereg(y ~ x1 + x2, data = mydata, lambda = 1)
+preds <- predict(model, newdata = mydata)
+
 }
